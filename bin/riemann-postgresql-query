@@ -1,0 +1,59 @@
+#!/usr/bin/env ruby
+#
+# Baed on https://github.com/riemann/riemann-postgresql
+#
+require 'riemann/tools'
+
+class Riemann::Tools::PostgreSQLQuery
+  include Riemann::Tools
+  require 'pg'
+
+  opt :postgresql_host, "PostgreSQL Server Hostname", :type => String, :default => "localhost"
+  opt :postgresql_port, "PostgreSQL Server Port", :default => 5432
+  opt :postgresql_username, "Authenticated username", :type => String, :default => "postgres"
+  opt :postgresql_password, "User's password", :type => String, :default => "postgres"
+  opt :postgresql_database, "Database to connect", :type => String, :default => "postgres"
+  opt :query, "Query to run, values should be numeric", :type => String, :default => "postgres-query"
+  opt :service, "Name of service, will be postfixed with column name and passed to riemann", :type => String, :default => "postgres-query"
+
+  def initialize
+    begin
+      @conn = PG.connect(:host     => opts[:postgresql_host],
+                         :port     => opts[:postgresql_port],
+      	                 :user     => opts[:postgresql_username],
+      	                 :password => opts[:postgresql_password],
+      	                 :dbname   => opts[:postgresql_database])
+    rescue
+      PG::Error
+        puts "Error: Unable to connect with PostgreSQL server."
+        exit 1
+    end
+  end
+
+  def tick
+    query = opts[:query]
+    @conn.transaction do
+      results = @conn.exec(query)
+      result = results.to_a.first
+
+      if result
+        # Iterate through cols
+        result.each do |key, value|
+          data = {
+            :host        => opts[:postgresql_host].dup,
+            :service     => "#{opts[:service]}-#{key}",
+            :metric      => value.to_f,
+            :state       => 'ok',
+            :description => query,
+            :tags        => ['postgresql']
+          }
+
+          report(data)
+        end
+      end
+    end
+  end
+
+end
+
+Riemann::Tools::PostgreSQLQuery.run
